@@ -32,9 +32,36 @@ Answer `y` to add the marketplace, then press Enter for the user scope.
 ### Develop
 
 ```
-claude --plugin-dir ./task-progress   # run it from this folder
+claude --plugin-dir ./task-progress   # run a mod from its folder
 claude plugin validate ./task-progress
 claude plugin test ./task-progress
+```
+
+## agent-tree
+
+A live tree of every subagent your session spawns, in a side pane.
+
+```
+◆ main session  2 running · 1 done
+├─ ◐ Explore  Review task-progress mod code          0:18 · 2 tools
+│     ↳ Read: /home/me/mods/task-progress/hooks/register.tsx
+├─ ✓ general-purpose  Research Jev API usage    0:40 · 8 tools · 36k tok
+└─ ◓ Explore  Review agent-tree mod code             0:12 · 1 tool
+      ↳ Read: hooks/register.tsx
+```
+
+- **Opens by itself** the first time an agent starts (on a wide terminal), or type `/agent-tree`.
+- **Nested agents** sit under the agent that spawned them.
+- Each agent has a **live spinner**, elapsed time, tool count and tokens, and shows `↳` what it is doing right now.
+- **Click an agent** to see its model, recent steps and the start of its answer.
+- ✓ done, ✗ failed, ■ stopped. **Clear finished** tidies the list.
+- The status line counts running agents: `⑂ 2 agents running`.
+- Resumed agents (SendMessage) restart their clock, and agents spawned before the mod loaded appear on their first step.
+
+### Install
+
+```
+/plugin install agent-tree --marketplace Teodagher/teo-mods
 ```
 
 ## License

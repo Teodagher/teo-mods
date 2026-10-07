@@ -9,6 +9,11 @@
       "name": "task-progress",
       "source": "./task-progress",
       "description": "Progress band above the prompt: current task, full-width bar with percentage, click to see every task"
+    },
+    {
+      "name": "agent-tree",
+      "source": "./agent-tree",
+      "description": "Live tree of the subagents your session spawns: status, time, tools, tokens, and what each is doing"
     }
   ]
 }
