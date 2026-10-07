@@ -15,7 +15,7 @@ const SPAWN = { prompt: 'Do it', parentModel: 'opus', provider: 'claude' as neve
 
 const opens: { id: string; title?: string }[] = []
 
-test("clicking an agent's name opens its chat, with its steps and results", async ($, on) => {
+test("clicking an agent's card opens its chat, with its steps and results", async ($, on) => {
   on('ui.open', (_$, e) => {
     opens.push(e as never)
 
@@ -28,7 +28,7 @@ test("clicking an agent's name opens its chat, with its steps and results", asyn
   await $.tool.call({ tool: 'Grep', pattern: 'login', agentId: 'a1' } as never)
 
   const board = await $.ui.mount({ plugin: 'agent-tree', surface: 'terminal', ...BOARD })
-  await board.press({ key: 'chat-a1' })
+  await board.post({ open: 'a1' }, { in: 'card-a1' })
   expect(opens.at(-1)).toMatchObject({ id: 'agent-chat', title: 'Chat · Explore' })
   await board.unmount()
 
@@ -57,7 +57,7 @@ test('its words show up in the chat as they stream', async ($, on) => {
   }
 
   const board = await $.ui.mount({ plugin: 'agent-tree', surface: 'terminal', ...BOARD })
-  await board.press({ key: 'chat-a1' })
+  await board.post({ open: 'a1' }, { in: 'card-a1' })
   await board.unmount()
 
   const chat = await $.ui.mount({ plugin: 'agent-tree', surface: 'terminal', ...CHAT })
@@ -81,7 +81,7 @@ test('typing in the field sends the agent a message', async ($, on) => {
   await $.turn.complete({ agentId: 'a1', answer: 'All good.', durationMs: 1, isAborted: false, turnId: 'x', reason: 'answer' })
 
   const board = await $.ui.mount({ plugin: 'agent-tree', surface: 'terminal', ...BOARD })
-  await board.press({ key: 'chat-a1' })
+  await board.post({ open: 'a1' }, { in: 'card-a1' })
   await board.unmount()
 
   const chat = await $.ui.mount({ plugin: 'agent-tree', surface: 'terminal', ...CHAT })
@@ -104,7 +104,7 @@ test('a message that cannot be delivered says why', async ($, on) => {
 
   await $.agent.spawn({ ...SPAWN, tool_use_id: 't1', description: 'Audit', subagentType: 'Explore' })
   const board = await $.ui.mount({ plugin: 'agent-tree', surface: 'terminal', ...BOARD })
-  await board.press({ key: 'chat-a1' })
+  await board.post({ open: 'a1' }, { in: 'card-a1' })
   await board.unmount()
 
   const chat = await $.ui.mount({ plugin: 'agent-tree', surface: 'terminal', ...CHAT })

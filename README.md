@@ -55,7 +55,7 @@ Agents  2 working · 1 finished
 - **Orange and walking** while it works (it blinks too), **green** when done, **red** if it failed, **yellow** if stopped.
 - **One sentence** in plain words: *Reading auth.ts*, *Searching the web for "jev api"*, then *Done:* and the first sentence of its answer.
 - Opens by itself the first time an agent starts (on a wide terminal), or type `/agent-tree`. Cards fill the pane's width, parents before their children.
-- **Chat with any agent**: click its name to open a chat pane with everything it is doing, live: its words as it writes them, each step (`⏺ Reading auth.ts`) and what came back (`⎿ …`). Type in the field at the bottom to send it a message, even after it finished; it picks the work back up.
+- **Chat with any agent**: click anywhere on its card (the card lights up on hover) to open a chat pane with everything it is doing, live: its words as it writes them, each step (`⏺ Reading auth.ts`) and what came back (`⎿ …`). Type in the field at the bottom to send it a message, even after it finished; it picks the work back up.
 - **Resize it**: drag the pane's edge, or press **◂ Narrower / Wider ▸** (docked beside the transcript) or **▴ Shorter / Taller ▾** (above the prompt). The cards reflow to fit.
 - **Clear finished** tidies the board. The status line counts working agents.
 

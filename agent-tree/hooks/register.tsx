@@ -3,6 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { Agent, AgentStatus, Entry, PaneSize } from '../types'
 
+import type { CardProps } from './card'
 import { registerChat } from './chat'
 
 import {
@@ -205,8 +206,22 @@ export const register: Register = on => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
+  // A card was clicked: open that agent's chat.
+  on('ui.message', async ($, e, next) => {
+    const { open } = (e.data ?? {}) as { open?: unknown }
+    const agent = (await read($, agents)).find(one => one.id === open)
+    if (agent) {
+      await openChat($, agent)
+    }
+
+    return next(e)
+  })
+
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Button, Text } = $.ui.resolve(e)
+    const table = $.ui.resolve(e)
+    const { Box, Button, Text } = table
+    // Whole clickable cards where the surface can draw them; the name alone is the button elsewhere.
+    const Client = (e.surface === 'terminal' || e.surface === 'desktop') && 'Client' in table ? table.Client : undefined
     const list = ordered(await read($, agents))
     const time = await read($, now)
     const width = Math.max(MIN_CARD, e.props.bodyColumns)
@@ -243,13 +258,30 @@ export const register: Register = on => {
           <Text color={MUTED}>{summary === '' ? '' : `  ${summary}`}</Text>
         </Box>
         {list.length === 0 && <Text color={MUTED}>No agents yet. Each one shows up here the moment it starts.</Text>}
-        {list.length > 0 && <Text color={MUTED}>Click an agent's name to chat with it.</Text>}
+        {list.length > 0 && <Text color={MUTED}>{Client ? 'Click a card to chat with that agent.' : "Click an agent's name to chat with it."}</Text>}
         <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
           {list.map((agent, i) => {
             const color = COLORS[agent.status]
             const [head, body, legs] = critter(agent.status, tick + i * 5)
             const side = inner - HEAD.length - 1
             const lines = wrap(agent.doing, inner, 2)
+
+            if (Client) {
+              const cardProps: CardProps = {
+                id: agent.id,
+                width: card,
+                color,
+                text: TEXT,
+                muted: MUTED,
+                critter: [head ?? '', body ?? '', legs ?? ''],
+                name: short(agent.type, side),
+                label: LABELS[agent.status],
+                lines,
+                isWorking: agent.status === 'running',
+              }
+
+              return <Client key={`card-${agent.id}`} module="./card.tsx" props={cardProps} width={card} height={7} />
+            }
 
             return (
               <Box key={agent.id} width={card} height={7} flexDirection="column" borderStyle="round" borderColor={color} paddingX={1}>
