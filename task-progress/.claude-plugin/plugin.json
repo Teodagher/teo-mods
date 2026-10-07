@@ -1,0 +1,9 @@
+{
+  "name": "task-progress",
+  "version": "0.1.0",
+  "description": "Progress band above the prompt: current task, full-width bar with percentage, click to see every task",
+  "author": {
+    "name": "Teodagher"
+  },
+  "types": "./types/index.d.ts"
+}

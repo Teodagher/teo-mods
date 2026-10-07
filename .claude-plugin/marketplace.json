@@ -1,0 +1,14 @@
+{
+  "name": "teo-mods",
+  "owner": {
+    "name": "Teodagher"
+  },
+  "description": "Teo's mods for Claude Code",
+  "plugins": [
+    {
+      "name": "task-progress",
+      "source": "./task-progress",
+      "description": "Progress band above the prompt: current task, full-width bar with percentage, click to see every task"
+    }
+  ]
+}
