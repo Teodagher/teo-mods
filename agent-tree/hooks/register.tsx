@@ -4,105 +4,146 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { Agent, AgentStatus } from '../types'
 
 const agents = atom({ plugin: 'agent-tree', key: 'agents' } as const, [] as Agent[])
-const expanded = atom({ plugin: 'agent-tree', key: 'expanded' } as const, [] as string[])
 const now = atom({ plugin: 'agent-tree', key: 'now' } as const, 0)
 const opened = atom({ plugin: 'agent-tree', key: 'opened' } as const, false)
 
 const PANE = 'agent-tree'
 const TITLE = 'Agents'
-const STEPS = 8
-// Past this long with no news, a running agent stops moving the clock.
+const TICK_MS = 300
+// Past this long with no news, a working agent stops moving the clock.
 const QUIET_MS = 10 * 60 * 1000
-const FRAMES = ['◐', '◓', '◑', '◒']
+// Cards are at least this wide, borders included; the pane fits as many as it can.
+const MIN_CARD = 28
 
 const COLORS: Record<AgentStatus, string> = {
-  running: '#7dcfff',
+  running: '#d97757',
   done: '#22c55e',
   failed: '#f7768e',
   stopped: '#e0af68',
 }
-const ICONS: Record<Exclude<AgentStatus, 'running'>, string> = { done: '✓', failed: '✗', stopped: '■' }
-const ROOT = '#bb9af7'
+const LABELS: Record<AgentStatus, string> = { running: 'working', done: 'done', failed: 'failed', stopped: 'stopped' }
+const ROOT = '#d97757'
 const TEXT = '#c0caf5'
 const MUTED = '#565f89'
+
+// The little Claude critter, three rows tall. A working one walks and blinks.
+const HEAD = ' ▐▛███▜▌ '
+const BLINK = ' ▐█████▌ '
+const BODY = '▝▜█████▛▘'
+const LEGS = ['  ▘▘ ▝▝  ', '  ▝▘ ▘▝  ']
+const STILL = '  ▘▘ ▝▝  '
+
+const critter = (status: AgentStatus, tick: number) =>
+  status === 'running'
+    ? [tick % 12 === 0 ? BLINK : HEAD, BODY, LEGS[tick % LEGS.length] ?? STILL]
+    : [HEAD, BODY, STILL]
 
 const short = (text: string, max: number) =>
   max <= 1 ? '' : text.length > max ? `${text.slice(0, max - 1)}…` : text
 
 const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim()
 
-const clock = (ms: number) => {
-  const seconds = Math.max(0, Math.floor(ms / 1000))
-  const m = Math.floor(seconds / 60)
+const base = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path
 
-  return m >= 60 ? `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}` : `${m}:${String(seconds % 60).padStart(2, '0')}`
-}
+const host = (url: string) => /^[a-z]+:\/\/([^/]+)/i.exec(url)?.[1] ?? url
 
-const count = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n))
-
-const describe = (e: { tool: string }) => {
-  const input = e as { description?: unknown; command?: unknown; pattern?: unknown; file_path?: unknown; query?: unknown; url?: unknown }
-  const detail = [input.description, input.query, input.pattern, input.url, input.file_path, input.command].find(
-    value => typeof value === 'string' && value !== '',
-  ) as string | undefined
+// One plain sentence for what a tool call is doing.
+const sentence = (e: { tool: string }) => {
+  const input = e as Record<string, unknown>
+  const text = (key: string) => (typeof input[key] === 'string' ? oneLine(input[key] as string) : '')
   const tool = e.tool.startsWith('mcp__') ? (e.tool.split('__').at(-1) ?? e.tool) : e.tool
 
-  return detail ? `${tool}: ${oneLine(detail)}` : tool
+  switch (tool) {
+    case 'Read':
+      return `Reading ${base(text('file_path'))}`
+    case 'Grep':
+      return `Searching the code for "${text('pattern')}"`
+    case 'Glob':
+      return `Looking for files like ${text('pattern')}`
+    case 'Edit':
+      return `Editing ${base(text('file_path'))}`
+    case 'Write':
+      return `Writing ${base(text('file_path'))}`
+    case 'WebSearch':
+      return `Searching the web for "${text('query')}"`
+    case 'WebFetch':
+      return `Reading a page on ${host(text('url'))}`
+    case 'Bash':
+      return text('description') || `Running ${text('command').split(' ')[0] || 'a command'}`
+    case 'Agent':
+      return `Handing off: ${text('description')}`
+    default:
+      return text('description') || `Using ${tool}`
+  }
+}
+
+const firstSentence = (text: string) => {
+  const flat = oneLine(text.replace(/[#*`>_]/g, ''))
+
+  return (/^.+?[.!?](\s|$)/.exec(flat)?.[0] ?? flat).trim()
+}
+
+// Words into at most `lines` lines of `width`, the last one cut with an ellipsis.
+const wrap = (text: string, width: number, lines: number) => {
+  const out: string[] = []
+  let rest = text
+  while (rest !== '' && out.length < lines) {
+    if (out.length === lines - 1 || rest.length <= width) {
+      out.push(short(rest, width))
+      break
+    }
+    const cut = rest.lastIndexOf(' ', width)
+    const at = cut > 0 ? cut : width
+    out.push(rest.slice(0, at))
+    rest = rest.slice(at).trimStart()
+  }
+
+  return out
 }
 
 const patch = (list: Agent[], id: string, change: (agent: Agent) => Agent) =>
   list.map(agent => (agent.id === id ? change(agent) : agent))
 
-// Depth-first, children under their parent, each row with its tree prefix.
-type Row = { agent: Agent; prefix: string; under: string }
-
-const flatten = (list: Agent[]) => {
+// Parents before their children, so a team reads left to right.
+const ordered = (list: Agent[]) => {
   const ids = new Set(list.map(agent => agent.id))
   const isRoot = (agent: Agent) => agent.parentId === null || agent.parentId === agent.id || !ids.has(agent.parentId)
-  const childrenOf = (parent: string | null) =>
-    list.filter(agent => (parent === null ? isRoot(agent) : agent.parentId === parent && !isRoot(agent)))
-  const rows: Row[] = []
+  const out: Agent[] = []
   const seen = new Set<string>()
-  const walk = (parent: string | null, indent: string) => {
-    // A parent loop would hide its agents: each agent is drawn once, at most.
-    const children = childrenOf(parent).filter(agent => !seen.has(agent.id))
-    children.forEach(agent => seen.add(agent.id))
-    children.forEach((agent, i) => {
-      const isLast = i === children.length - 1
-      rows.push({ agent, prefix: `${indent}${isLast ? '└─ ' : '├─ '}`, under: `${indent}${isLast ? '   ' : '│  '}` })
-      walk(agent.id, `${indent}${isLast ? '   ' : '│  '}`)
-    })
+  const walk = (agent: Agent) => {
+    if (seen.has(agent.id)) {
+      return
+    }
+    seen.add(agent.id)
+    out.push(agent)
+    list.filter(one => one.parentId === agent.id && !isRoot(one)).forEach(walk)
   }
-  walk(null, '')
-  // Agents caught in a loop of parents, drawn at the root.
-  const rest = list.filter(agent => !seen.has(agent.id))
-  rest.forEach((agent, i) => {
-    const isLast = i === rest.length - 1
-    rows.push({ agent, prefix: isLast ? '└─ ' : '├─ ', under: isLast ? '   ' : '│  ' })
-  })
+  list.filter(isRoot).forEach(walk)
+  // Agents caught in a loop of parents.
+  list.filter(agent => !seen.has(agent.id)).forEach(agent => out.push(agent))
 
-  return rows
+  return out
 }
 
-// The status line says how many agents run, and clears when none do.
+// The status line says how many agents work, and clears when none do.
 const showStatus = async ($: EngineInterface) => {
   const list = await read($, agents)
   const running = list.filter(agent => agent.status === 'running').length
-  $.ui.status(running === 0 ? undefined : `⑂ ${running} agent${running === 1 ? '' : 's'} running`)
+  $.ui.status(running === 0 ? undefined : `▐▛▜▌ ${running} agent${running === 1 ? '' : 's'} working`)
 }
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    await $.command.register({ name: 'agent-tree', description: 'Open the live tree of subagents' })
+    await $.command.register({ name: 'agent-tree', description: 'Open the live board of subagents' })
     await update($, now, () => Date.now())
 
-    // Keeps elapsed times and spinners moving while anything runs.
-    $.clock.every(500, () => {
+    // Walks the critters while anything works.
+    $.clock.every(TICK_MS, () => {
       void (async () => {
         const list = await read($, agents)
         const at = Date.now()
         if (list.some(agent => agent.status === 'running' && at - agent.lastAt < QUIET_MS)) {
-          await update($, now, () => Date.now())
+          await update($, now, () => at)
         }
       })()
     })
@@ -113,35 +154,27 @@ export const register: Register = on => {
   on('command.run', { command: 'agent-tree' }, async $ => {
     await $.ui.open({ id: PANE, title: TITLE })
 
-    return { text: 'Agent tree opened.' }
+    return { text: 'Agent board opened.' }
   })
 
-  // A new subagent: add it under its parent, and show the tree the first time.
+  // A new subagent joins the board, which opens the first time.
   on('agent.spawn', async ($, e, next) => {
     const ran = await next(e)
     if (ran.deny !== undefined) {
       return ran
     }
 
-    const startedAt = Date.now()
+    const at = Date.now()
     const agent: Agent = {
       id: ran.agentId ?? e.tool_use_id,
       parentId: e.parentAgentId ?? null,
       type: e.subagentType,
-      description: oneLine(e.description),
-      model: ran.model,
       status: 'running',
-      startedAt,
-      endedAt: null,
-      lastAt: startedAt,
-      tools: 0,
-      current: 'Starting',
-      steps: [],
-      answer: '',
-      tokens: 0,
+      lastAt: at,
+      doing: `Getting started: ${oneLine(e.description)}`,
     }
     await update($, agents, list => [...list.filter(one => one.id !== agent.id), agent])
-    await update($, now, () => startedAt)
+    await update($, now, () => at)
     await showStatus($)
 
     if (!(await read($, opened))) {
@@ -156,13 +189,12 @@ export const register: Register = on => {
   on('tool.call', async ($, e, next) => {
     const { agentId } = e
     if (agentId !== undefined) {
-      // A subagent's own step; a resumed agent is running again.
-      const step = describe(e)
+      // A subagent's own step; a resumed agent works again.
+      const doing = sentence(e)
       const at = Date.now()
       await update($, agents, list => {
-        // An agent the tree never saw start (spawned before this mod loaded).
-        const known = list.some(agent => agent.id === agentId)
-        const all = known
+        // An agent the board never saw start (spawned before this mod loaded).
+        const all = list.some(agent => agent.id === agentId)
           ? list
           : [
               ...list,
@@ -170,36 +202,13 @@ export const register: Register = on => {
                 id: agentId,
                 parentId: null,
                 type: (e as { agent_type?: unknown }).agent_type?.toString() ?? 'agent',
-                description: '',
-                model: 'unknown',
                 status: 'running' as const,
-                startedAt: at,
-                endedAt: null,
                 lastAt: at,
-                tools: 0,
-                current: '',
-                steps: [],
-                answer: '',
-                tokens: 0,
+                doing,
               },
             ]
 
-        return patch(all, agentId, agent => {
-          // Resumed after it finished: a fresh run, timed from now.
-          const resumed = agent.status !== 'running'
-
-          return {
-            ...agent,
-            status: 'running',
-            startedAt: resumed ? at : agent.startedAt,
-            endedAt: null,
-            lastAt: at,
-            tools: agent.tools + 1,
-            current: step,
-            steps: [...(resumed ? [] : agent.steps), step].slice(-STEPS),
-            answer: resumed ? '' : agent.answer,
-          }
-        })
+        return patch(all, agentId, agent => ({ ...agent, status: 'running', lastAt: at, doing }))
       })
       await showStatus($)
     }
@@ -210,9 +219,10 @@ export const register: Register = on => {
     if ((e.tool as string) === 'TaskStop' && ran.deny === undefined && ran.isError !== true) {
       const { task_id: taskId } = e as { task_id?: unknown }
       if (typeof taskId === 'string') {
-        const endedAt = Date.now()
         await update($, agents, list =>
-          patch(list, taskId, agent => (agent.status === 'running' ? { ...agent, status: 'stopped', endedAt } : agent)),
+          patch(list, taskId, agent =>
+            agent.status === 'running' ? { ...agent, status: 'stopped', doing: 'Was stopped before it finished.' } : agent,
+          ),
         )
         await showStatus($)
       }
@@ -226,19 +236,17 @@ export const register: Register = on => {
     const { agentId } = e
     if (agentId !== undefined) {
       const status: AgentStatus = e.isAborted ? 'stopped' : e.reason === 'answer' ? 'done' : 'failed'
-      const endedAt = Date.now()
-      const used = e.usage ? e.usage.input_tokens + e.usage.output_tokens : 0
-      await update($, agents, list =>
-        patch(list, agentId, agent => ({
-          ...agent,
-          status,
-          endedAt,
-          current: status === 'done' ? 'Finished' : status === 'failed' ? 'Failed' : 'Stopped',
-          answer: e.answer.trim(),
-          tokens: agent.tokens + used,
-        })),
-      )
-      await update($, now, () => endedAt)
+      const answer = firstSentence(e.answer)
+      const doing =
+        status === 'done'
+          ? answer === ''
+            ? 'Finished.'
+            : `Done: ${answer}`
+          : status === 'failed'
+            ? 'Hit an error and stopped.'
+            : 'Was stopped before it finished.'
+      await update($, agents, list => patch(list, agentId, agent => ({ ...agent, status, lastAt: Date.now(), doing })))
+      await update($, now, () => Date.now())
       await showStatus($)
     }
 
@@ -247,89 +255,62 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Button, Text } = $.ui.resolve(e)
-    const list = await read($, agents)
-    const open = await read($, expanded)
+    const list = ordered(await read($, agents))
     const time = await read($, now)
-    const width = Math.max(30, e.props.bodyColumns)
-    const frame = FRAMES[Math.floor(time / 500) % FRAMES.length] ?? '◐'
+    const width = Math.max(MIN_CARD, e.props.bodyColumns)
+    const perRow = Math.max(1, Math.floor((width + 1) / (MIN_CARD + 1)))
+    const card = Math.floor((width + 1) / perRow) - 1
+    const inner = card - 4
+    const tick = Math.floor(time / TICK_MS)
 
-    const tally = (status: AgentStatus) => list.filter(agent => agent.status === status).length
-    const summary = [
-      [tally('running'), 'running'],
-      [tally('done'), 'done'],
-      [tally('failed'), 'failed'],
-      [tally('stopped'), 'stopped'],
-    ]
-      .filter(([n]) => n !== 0)
-      .map(([n, label]) => `${n} ${label}`)
-      .join(' · ')
+    const working = list.filter(agent => agent.status === 'running').length
+    const finished = list.length - working
+    const summary = [working ? `${working} working` : '', finished ? `${finished} finished` : ''].filter(Boolean).join(' · ')
 
-    const toggle = (id: string) => update($, expanded, ids => (ids.includes(id) ? ids.filter(one => one !== id) : [...ids, id]))
     const clear = async () => {
-      const keep = (await read($, agents)).filter(agent => agent.status === 'running')
-      await update($, agents, () => keep)
-      await update($, expanded, ids => ids.filter(id => keep.some(agent => agent.id === id)))
+      await update($, agents, all => all.filter(agent => agent.status === 'running'))
     }
 
     return (
       <Box flexDirection="column">
         <Box>
           <Text color={ROOT} bold>
-            ◆ main session
+            Agents
           </Text>
           <Text color={MUTED}>{summary === '' ? '' : `  ${summary}`}</Text>
         </Box>
-        {list.length === 0 && (
-          <Text color={MUTED}>{'   No agents yet. They show up here the moment one is spawned.'}</Text>
-        )}
-        {flatten(list).map(({ agent, prefix, under }) => {
-          const isOpen = open.includes(agent.id)
-          const icon = agent.status === 'running' ? frame : ICONS[agent.status]
-          const elapsed = clock((agent.endedAt ?? Math.max(time, agent.startedAt)) - agent.startedAt)
-          const stats = [elapsed, `${agent.tools} tool${agent.tools === 1 ? '' : 's'}`, agent.tokens > 0 ? `${count(agent.tokens)} tok` : '']
-            .filter(Boolean)
-            .join(' · ')
-          const head = `${prefix}${icon} `
-          const label = short(`${agent.type}  ${agent.description}`, width - head.length - stats.length - 2)
-          const gap = ' '.repeat(Math.max(1, width - head.length - label.length - stats.length))
-          const detail = (text: string, color: string, key: string) => (
-            <Text key={key} color={color}>
-              {short(`${under}  ${text}`, width)}
-            </Text>
-          )
+        {list.length === 0 && <Text color={MUTED}>No agents yet. Each one shows up here the moment it starts.</Text>}
+        <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
+          {list.map((agent, i) => {
+            const color = COLORS[agent.status]
+            const [head, body, legs] = critter(agent.status, tick + i * 5)
+            const side = inner - HEAD.length - 1
+            const lines = wrap(agent.doing, inner, 2)
 
-          return (
-            <Box key={agent.id} flexDirection="column">
-              <Box>
-                <Text color={MUTED}>{prefix}</Text>
-                <Text color={COLORS[agent.status]} bold>
-                  {`${icon} `}
-                </Text>
-                <Button key={`row-${agent.id}`} plain onPress={() => toggle(agent.id)}>
-                  {label}
-                </Button>
-                <Text>{gap}</Text>
-                <Text color={MUTED}>{stats}</Text>
+            return (
+              <Box key={agent.id} width={card} height={7} flexDirection="column" borderStyle="round" borderColor={color} paddingX={1}>
+                <Box>
+                  <Text color={color}>{head}</Text>
+                  <Text color={TEXT} bold>
+                    {` ${short(agent.type, side)}`}
+                  </Text>
+                </Box>
+                <Box>
+                  <Text color={color}>{body}</Text>
+                  <Text color={color}>{` ${LABELS[agent.status]}`}</Text>
+                </Box>
+                <Text color={color}>{legs}</Text>
+                {lines.map((line, n) => (
+                  <Text key={`line-${n}`} color={agent.status === 'running' ? TEXT : MUTED}>
+                    {line}
+                  </Text>
+                ))}
               </Box>
-              {agent.status === 'running' && detail(`↳ ${agent.current}`, TEXT, 'current')}
-              {isOpen && detail(`model ${agent.model}`, MUTED, 'model')}
-              {isOpen &&
-                agent.steps
-                  .slice(agent.status === 'running' ? 0 : undefined, agent.status === 'running' ? -1 : undefined)
-                  .map((step, i) => detail(`· ${step}`, MUTED, `step-${i}`))}
-              {isOpen &&
-                agent.answer !== '' &&
-                agent.answer
-                  .split('\n')
-                  .filter(line => line.trim() !== '')
-                  .slice(0, 4)
-                  .map((line, i) => detail(`${i === 0 ? '» ' : '  '}${oneLine(line)}`, COLORS[agent.status], `answer-${i}`))}
-            </Box>
-          )
-        })}
-        <Text> </Text>
+            )
+          })}
+        </Box>
         <Box>
-          {list.some(agent => agent.status !== 'running') && (
+          {finished > 0 && (
             <Button key="clear" onPress={() => void clear()}>
               Clear finished
             </Button>
@@ -339,7 +320,6 @@ export const register: Register = on => {
             Close
           </Button>
         </Box>
-        <Text color={MUTED}>click an agent to see its steps and answer</Text>
       </Box>
     )
   })

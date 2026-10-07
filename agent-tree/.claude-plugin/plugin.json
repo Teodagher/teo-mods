@@ -1,7 +1,7 @@
 {
   "name": "agent-tree",
   "version": "0.1.0",
-  "description": "Live tree of the subagents your session spawns: status, time, tools, tokens, and what each is doing",
+  "description": "Live board of your subagents: a little Claude critter per agent and one sentence on what it is doing",
   "author": { "name": "Teodagher" },
   "types": "./types/index.d.ts"
 }

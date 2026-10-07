@@ -13,7 +13,7 @@
     {
       "name": "agent-tree",
       "source": "./agent-tree",
-      "description": "Live tree of the subagents your session spawns: status, time, tools, tokens, and what each is doing"
+      "description": "Live board of your subagents: a little Claude critter per agent and one sentence on what it is doing"
     }
   ]
 }

@@ -39,24 +39,23 @@ claude plugin test ./task-progress
 
 ## agent-tree
 
-A live tree of every subagent your session spawns, in a side pane.
+A live board of every subagent your session spawns, in a side pane. Each agent is a little Claude critter in its own card, with one plain sentence on what it is doing.
 
 ```
-◆ main session  2 running · 1 done
-├─ ◐ Explore  Review task-progress mod code          0:18 · 2 tools
-│     ↳ Read: /home/me/mods/task-progress/hooks/register.tsx
-├─ ✓ general-purpose  Research Jev API usage    0:40 · 8 tools · 36k tok
-└─ ◓ Explore  Review agent-tree mod code             0:12 · 1 tool
-      ↳ Read: hooks/register.tsx
+Agents  2 working · 1 finished
+╭───────────────────────────╮ ╭───────────────────────────╮ ╭───────────────────────────╮
+│  ▐▛███▜▌  Explore         │ │  ▐▛███▜▌  general-purpose │ │  ▐▛███▜▌  Explore         │
+│ ▝▜█████▛▘ working         │ │ ▝▜█████▛▘ working         │ │ ▝▜█████▛▘ done            │
+│   ▘▘ ▝▝                   │ │   ▝▘ ▘▝                   │ │   ▘▘ ▝▝                   │
+│ Reading register.tsx      │ │ Searching the web for     │ │ Done: The auth code lives │
+│                           │ │ "jev api"                 │ │ in src/auth.              │
+╰───────────────────────────╯ ╰───────────────────────────╯ ╰───────────────────────────╯
 ```
 
-- **Opens by itself** the first time an agent starts (on a wide terminal), or type `/agent-tree`.
-- **Nested agents** sit under the agent that spawned them.
-- Each agent has a **live spinner**, elapsed time, tool count and tokens, and shows `↳` what it is doing right now.
-- **Click an agent** to see its model, recent steps and the start of its answer.
-- ✓ done, ✗ failed, ■ stopped. **Clear finished** tidies the list.
-- The status line counts running agents: `⑂ 2 agents running`.
-- Resumed agents (SendMessage) restart their clock, and agents spawned before the mod loaded appear on their first step.
+- **Orange and walking** while it works (it blinks too), **green** when done, **red** if it failed, **yellow** if stopped.
+- **One sentence** in plain words: *Reading auth.ts*, *Searching the web for "jev api"*, then *Done:* and the first sentence of its answer.
+- Opens by itself the first time an agent starts (on a wide terminal), or type `/agent-tree`. Cards fill the pane's width, parents before their children.
+- **Clear finished** tidies the board. The status line counts working agents.
 
 ### Install
 
