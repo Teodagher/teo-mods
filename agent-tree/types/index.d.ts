@@ -10,8 +10,11 @@ export type Agent = {
   doing: string
 }
 
+// The pane size asked for with the − / + buttons; 0 leaves it to the engine.
+export type PaneSize = { columns: number; rows: number }
+
 declare module 'claude-code' {
   interface PluginState {
-    'agent-tree': { agents: Agent[]; now: number; opened: boolean }
+    'agent-tree': { agents: Agent[]; now: number; opened: boolean; size: PaneSize }
   }
 }

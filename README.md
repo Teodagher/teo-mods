@@ -55,6 +55,7 @@ Agents  2 working · 1 finished
 - **Orange and walking** while it works (it blinks too), **green** when done, **red** if it failed, **yellow** if stopped.
 - **One sentence** in plain words: *Reading auth.ts*, *Searching the web for "jev api"*, then *Done:* and the first sentence of its answer.
 - Opens by itself the first time an agent starts (on a wide terminal), or type `/agent-tree`. Cards fill the pane's width, parents before their children.
+- **Resize it**: drag the pane's edge, or press **◂ Narrower / Wider ▸** (docked beside the transcript) or **▴ Shorter / Taller ▾** (above the prompt). The cards reflow to fit.
 - **Clear finished** tidies the board. The status line counts working agents.
 
 ### Install

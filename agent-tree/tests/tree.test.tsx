@@ -132,3 +132,37 @@ test('three cards share a row, and a long sentence wraps onto a second line', as
   expect(await ui.find({ type: 'Text', text: /3 working/ })).toBeDefined()
   await ui.unmount()
 })
+
+test('Wider and Narrower ask for a docked pane a card wider or narrower', async ($, on) => {
+  const asked: number[] = []
+  on('ui.open', (_$, e) => {
+    asked.push((e as { columns?: number }).columns ?? 0)
+
+    return { value: { isOpen: true } } as never
+  })
+
+  const ui = await $.ui.mount({ plugin: 'agent-tree', surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns: 60 } })
+  await ui.press({ key: 'bigger' })
+  await ui.press({ key: 'bigger' })
+  await ui.press({ key: 'smaller' })
+  expect(asked).toEqual([89, 118, 89])
+  await ui.unmount()
+})
+
+test('inline, the buttons ask for a taller or shorter pane', async ($, on) => {
+  const asked: number[] = []
+  on('ui.open', (_$, e) => {
+    asked.push((e as { rows?: number }).rows ?? 0)
+
+    return { value: { isOpen: true } } as never
+  })
+
+  const inline = { ...PANE.props, placement: 'inline' as const, scroll: { offset: 0, bodyRows: 12 } }
+  const ui = await $.ui.mount({ plugin: 'agent-tree', surface: 'terminal', ...PANE, props: inline })
+  expect(await ui.find({ type: 'Button', text: /Taller/ })).toBeDefined()
+  await ui.press({ key: 'bigger' })
+  await ui.press({ key: 'smaller' })
+  await ui.press({ key: 'smaller' })
+  expect(asked).toEqual([19, 12, 9])
+  await ui.unmount()
+})

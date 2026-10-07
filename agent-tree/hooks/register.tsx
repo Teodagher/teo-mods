@@ -1,11 +1,12 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Agent, AgentStatus } from '../types'
+import type { Agent, AgentStatus, PaneSize } from '../types'
 
 const agents = atom({ plugin: 'agent-tree', key: 'agents' } as const, [] as Agent[])
 const now = atom({ plugin: 'agent-tree', key: 'now' } as const, 0)
 const opened = atom({ plugin: 'agent-tree', key: 'opened' } as const, false)
+const size = atom({ plugin: 'agent-tree', key: 'size' } as const, { columns: 0, rows: 0 } as PaneSize)
 
 const PANE = 'agent-tree'
 const TITLE = 'Agents'
@@ -14,6 +15,18 @@ const TICK_MS = 300
 const QUIET_MS = 10 * 60 * 1000
 // Cards are at least this wide, borders included; the pane fits as many as it can.
 const MIN_CARD = 28
+// One press of − or + : a card's width when docked, a card's height inline.
+const STEP_COLUMNS = MIN_CARD + 1
+const STEP_ROWS = 7
+const LIMITS = { columns: [MIN_CARD + 2, 240], rows: [9, 80] } as const
+
+const clamp = (n: number, [low, high]: readonly [number, number]) => Math.min(high, Math.max(low, n))
+
+// Opens the pane at the size last asked for; a size the person dragged still wins.
+const openPane = async ($: EngineInterface) => {
+  const { columns, rows } = await read($, size)
+  await $.ui.open({ id: PANE, title: TITLE, ...(columns > 0 ? { columns } : {}), ...(rows > 0 ? { rows } : {}) })
+}
 
 const COLORS: Record<AgentStatus, string> = {
   running: '#d97757',
@@ -152,7 +165,7 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   on('command.run', { command: 'agent-tree' }, async $ => {
-    await $.ui.open({ id: PANE, title: TITLE })
+    await openPane($)
 
     return { text: 'Agent board opened.' }
   })
@@ -180,7 +193,7 @@ export const register: Register = on => {
     if (!(await read($, opened))) {
       await update($, opened, () => true)
       // Not awaited: an unasked pane waits for a wide enough terminal.
-      $.ui.open({ id: PANE, title: TITLE }).catch(() => undefined)
+      openPane($).catch(() => undefined)
     }
 
     return ran
@@ -267,6 +280,17 @@ export const register: Register = on => {
     const finished = list.length - working
     const summary = [working ? `${working} working` : '', finished ? `${finished} finished` : ''].filter(Boolean).join(' · ')
 
+    const isDocked = e.props.placement === 'dock'
+    const visibleRows = e.props.scroll.bodyRows
+    const resize = async (direction: 1 | -1) => {
+      const now = await read($, size)
+      const next = isDocked
+        ? { ...now, columns: clamp((now.columns || width) + direction * STEP_COLUMNS, LIMITS.columns) }
+        : { ...now, rows: clamp((now.rows || visibleRows) + direction * STEP_ROWS, LIMITS.rows) }
+      await update($, size, () => next)
+      await openPane($)
+    }
+
     const clear = async () => {
       await update($, agents, all => all.filter(agent => agent.status === 'running'))
     }
@@ -315,6 +339,14 @@ export const register: Register = on => {
               Clear finished
             </Button>
           )}
+          <Text> </Text>
+          <Button key="smaller" onPress={() => void resize(-1)}>
+            {isDocked ? '◂ Narrower' : '▴ Shorter'}
+          </Button>
+          <Text> </Text>
+          <Button key="bigger" onPress={() => void resize(1)}>
+            {isDocked ? 'Wider ▸' : 'Taller ▾'}
+          </Button>
           <Text> </Text>
           <Button key="close" role="dismiss" onPress={() => void $.ui.close({ id: PANE })}>
             Close
