@@ -3,13 +3,11 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { Agent, AgentStatus, Entry, PaneSize } from '../types'
 
-import type { CardProps } from './card'
 import { registerChat } from './chat'
 
 import {
   BLINK,
   BODY,
-  CHAT,
   COLORS,
   HEAD,
   LABELS,
@@ -43,6 +41,7 @@ import {
   paneArgs,
   statusText,
   withLog,
+  HOVER,
 } from './shared'
 
 // The session's values, shared with the chat by their plugin and key.
@@ -65,9 +64,10 @@ const showStatus = async ($: EngineInterface) => {
 const addLog = ($: EngineInterface, id: string, kind: Entry['kind'], text: string) =>
   update($, logs, all => withLog(all, id, kind, text))
 
+// The chat opens in the board's own pane: no second pane to find room for.
 const openChat = async ($: EngineInterface, agent: Agent) => {
   await update($, chatWith, () => agent.id)
-  await $.ui.open({ id: CHAT, title: chatTitle(agent), focus: true })
+  await $.ui.open({ id: PANE, title: chatTitle(agent), focus: true })
 }
 
 export const register: Register = on => {
@@ -206,22 +206,13 @@ export const register: Register = on => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
-  // A card was clicked: open that agent's chat.
-  on('ui.message', async ($, e, next) => {
-    const { open } = (e.data ?? {}) as { open?: unknown }
-    const agent = (await read($, agents)).find(one => one.id === open)
-    if (agent) {
-      await openChat($, agent)
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
+    // The chat draws this pane while one is open.
+    if ((await read($, chatWith)) !== null) {
+      return next(e)
     }
 
-    return next(e)
-  })
-
-  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const table = $.ui.resolve(e)
-    const { Box, Button, Text } = table
-    // Whole clickable cards where the surface can draw them; the name alone is the button elsewhere.
-    const Client = (e.surface === 'terminal' || e.surface === 'desktop') && 'Client' in table ? table.Client : undefined
+    const { Box, Button, Text } = $.ui.resolve(e)
     const list = ordered(await read($, agents))
     const time = await read($, now)
     const width = Math.max(MIN_CARD, e.props.bodyColumns)
@@ -229,6 +220,8 @@ export const register: Register = on => {
     const card = Math.floor((width + 1) / perRow) - 1
     const inner = card - 4
     const tick = Math.floor(time / TICK_MS)
+    // Below one card's width, a list of lines instead of cards.
+    const isCompact = e.props.bodyColumns < MIN_CARD + 2
 
     const working = list.filter(agent => agent.status === 'running').length
     const finished = list.length - working
@@ -237,11 +230,11 @@ export const register: Register = on => {
     const isDocked = e.props.placement === 'dock'
     const visibleRows = e.props.scroll.bodyRows
     const resize = async (direction: 1 | -1) => {
-      const now = await read($, size)
-      const next = isDocked
-        ? { ...now, columns: clamp((now.columns || width) + direction * STEP_COLUMNS, LIMITS.columns) }
-        : { ...now, rows: clamp((now.rows || visibleRows) + direction * STEP_ROWS, LIMITS.rows) }
-      await update($, size, () => next)
+      const current = await read($, size)
+      const wanted = isDocked
+        ? { ...current, columns: clamp((current.columns || width) + direction * STEP_COLUMNS, LIMITS.columns) }
+        : { ...current, rows: clamp((current.rows || visibleRows) + direction * STEP_ROWS, LIMITS.rows) }
+      await update($, size, () => wanted)
       await openPane($)
     }
 
@@ -258,54 +251,67 @@ export const register: Register = on => {
           <Text color={MUTED}>{summary === '' ? '' : `  ${summary}`}</Text>
         </Box>
         {list.length === 0 && <Text color={MUTED}>No agents yet. Each one shows up here the moment it starts.</Text>}
-        {list.length > 0 && <Text color={MUTED}>{Client ? 'Click a card to chat with that agent.' : "Click an agent's name to chat with it."}</Text>}
-        <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
-          {list.map((agent, i) => {
-            const color = COLORS[agent.status]
-            const [head, body, legs] = critter(agent.status, tick + i * 5)
-            const side = inner - HEAD.length - 1
-            const lines = wrap(agent.doing, inner, 2)
-
-            if (Client) {
-              const cardProps: CardProps = {
-                id: agent.id,
-                width: card,
-                color,
-                text: TEXT,
-                muted: MUTED,
-                critter: [head ?? '', body ?? '', legs ?? ''],
-                name: short(agent.type, side),
-                label: LABELS[agent.status],
-                lines,
-                isWorking: agent.status === 'running',
-              }
-
-              return <Client key={`card-${agent.id}`} module="./card.tsx" props={cardProps} width={card} height={7} />
-            }
-
-            return (
-              <Box key={agent.id} width={card} height={7} flexDirection="column" borderStyle="round" borderColor={color} paddingX={1}>
-                <Box>
-                  <Text color={color}>{head}</Text>
-                  <Text> </Text>
-                  <Button key={`chat-${agent.id}`} plain onPress={() => void openChat($, agent)}>
-                    {short(agent.type, side - 1)}
-                  </Button>
-                </Box>
-                <Box>
-                  <Text color={color}>{body}</Text>
-                  <Text color={color}>{` ${LABELS[agent.status]}`}</Text>
-                </Box>
-                <Text color={color}>{legs}</Text>
-                {lines.map((line, n) => (
-                  <Text key={`line-${n}`} color={agent.status === 'running' ? TEXT : MUTED}>
-                    {line}
-                  </Text>
-                ))}
+        {list.length > 0 && <Text color={MUTED}>Click an agent to see what it is doing and chat with it.</Text>}
+        {isCompact ? (
+          // Too narrow for cards: one clickable line per agent.
+          <Box flexDirection="column">
+            {list.map(agent => (
+              <Box key={agent.id} hover={{ backgroundColor: HOVER }}>
+                <Text color={COLORS[agent.status]}>{'▐▛▜▌ '}</Text>
+                <Button key={`chat-${agent.id}`} plain dimColor={agent.status !== 'running'} onPress={() => void openChat($, agent)}>
+                  {short(`${agent.type} · ${agent.doing}`, Math.max(8, e.props.bodyColumns) - 6)}
+                </Button>
               </Box>
-            )
-          })}
-        </Box>
+            ))}
+          </Box>
+        ) : (
+          <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
+            {list.map((agent, i) => {
+              const color = COLORS[agent.status]
+              const [head, body, legs] = critter(agent.status, tick + i * 5)
+              const side = inner - HEAD.length - 1
+              const lines = wrap(agent.doing, inner, 2)
+              const open = () => void openChat($, agent)
+
+              // The name and the sentence are buttons, so any click or key on them opens the chat.
+              return (
+                <Box
+                  key={agent.id}
+                  width={card}
+                  height={7}
+                  flexDirection="column"
+                  borderStyle="round"
+                  borderColor={color}
+                  paddingX={1}
+                  hover={{ borderStyle: 'bold' }}
+                >
+                  <Box>
+                    <Text color={color}>{head}</Text>
+                    <Text> </Text>
+                    <Button key={`chat-${agent.id}`} plain hover={{ bold: true, underline: true }} onPress={open}>
+                      {short(agent.type, side - 1)}
+                    </Button>
+                  </Box>
+                  <Box>
+                    <Text color={color}>{body}</Text>
+                    <Text color={color}>{` ${LABELS[agent.status]}`}</Text>
+                    <Box display="none" hover={{ display: 'flex' }}>
+                      <Text color={color} bold>
+                        {'  chat ›'}
+                      </Text>
+                    </Box>
+                  </Box>
+                  <Text color={color}>{legs}</Text>
+                  {lines.map((line, n) => (
+                    <Button key={`line-${agent.id}-${n}`} plain dimColor={agent.status !== 'running'} onPress={open}>
+                      {line}
+                    </Button>
+                  ))}
+                </Box>
+              )
+            })}
+          </Box>
+        )}
         <Box>
           {finished > 0 && (
             <Button key="clear" onPress={() => void clear()}>

@@ -24,16 +24,16 @@ test('a new agent gets a critter card and one sentence on what it is doing', asy
 
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ plugin: 'agent-tree', surface, ...PANE })
-    expect(await ui.find({ type: 'Text', text: /Getting started: Find auth code/, in: 'card-a1' })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /▝▜█████▛▘/, in: 'card-a1' })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /working/ })).toBeDefined()
+    expect(await ui.find({ text: /Getting started: Find auth code/ })).toBeDefined()
+    expect(await ui.find({ text: /▝▜█████▛▘/ })).toBeDefined()
+    expect(await ui.find({ text: /working/ })).toBeDefined()
     await ui.unmount()
   }
 
   await $.tool.call({ tool: 'Grep', pattern: 'login', agentId: 'a1' } as never)
   const ui = await $.ui.mount({ plugin: 'agent-tree', surface: 'terminal', ...PANE })
-  expect(await ui.find({ type: 'Text', text: /Searching the code for "login"/, in: 'card-a1' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /Getting started/, in: 'card-a1' })).toBeUndefined()
+  expect(await ui.find({ text: /Searching the code for "login"/ })).toBeDefined()
+  expect(await ui.find({ text: /Getting started/ })).toBeUndefined()
   await ui.unmount()
 })
 
@@ -51,7 +51,7 @@ test('tool calls read as plain sentences', async ($, on) => {
   for (const [input, expected] of cases) {
     await $.tool.call({ ...input, agentId: 'a1' } as never)
     const ui = await $.ui.mount({ plugin: 'agent-tree', surface: 'terminal', ...PANE })
-    expect(await ui.find({ type: 'Text', text: expected, in: 'card-a1' })).toBeDefined()
+    expect(await ui.find({ text: expected })).toBeDefined()
     await ui.unmount()
   }
 })
@@ -71,12 +71,12 @@ test('a finished agent sums up its answer in one sentence', async ($, on) => {
   })
 
   const ui = await $.ui.mount({ plugin: 'agent-tree', surface: 'terminal', ...PANE })
-  expect(await ui.find({ type: 'Text', text: /Done: The auth code lives in src\/auth\./, in: 'card-a1' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /It uses JWT/, in: 'card-a1' })).toBeUndefined()
-  expect(await ui.find({ type: 'Text', text: /1 finished/ })).toBeDefined()
+  expect(await ui.find({ text: /Done: The auth code lives in src\/auth\./ })).toBeDefined()
+  expect(await ui.find({ text: /It uses JWT/ })).toBeUndefined()
+  expect(await ui.find({ text: /1 finished/ })).toBeDefined()
 
   await ui.press({ key: 'clear' })
-  expect(await ui.find({ type: 'Text', text: /No agents yet/ })).toBeDefined()
+  expect(await ui.find({ text: /No agents yet/ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -91,8 +91,8 @@ test('stopped and failed agents say so', async ($, on) => {
   await $.turn.complete({ agentId: 'a2', answer: '', durationMs: 1, isAborted: false, turnId: 'y', reason: 'error' })
 
   const ui = await $.ui.mount({ plugin: 'agent-tree', surface: 'terminal', ...PANE })
-  expect(await ui.find({ type: 'Text', text: /Was stopped before it finished/, in: 'card-a1' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /Hit an error and stopped/, in: 'card-a2' })).toBeDefined()
+  expect(await ui.find({ text: /Was stopped before it finished/ })).toBeDefined()
+  expect(await ui.find({ text: /Hit an error and stopped/ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -107,15 +107,15 @@ test('a resumed agent works again, and an unseen one joins on its first step', a
   await $.tool.call({ tool: 'Grep', pattern: 'ghost', agentId: 'ghost' } as never)
 
   const ui = await $.ui.mount({ plugin: 'agent-tree', surface: 'terminal', ...PANE })
-  expect(await ui.find({ type: 'Text', text: /2 working/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /Done: First/, in: 'card-a1' })).toBeUndefined()
-  expect(await ui.find({ type: 'Text', text: /"ghost"/, in: 'card-ghost' })).toBeDefined()
+  expect(await ui.find({ text: /2 working/ })).toBeDefined()
+  expect(await ui.find({ text: /Done: First/ })).toBeUndefined()
+  expect(await ui.find({ text: /"ghost"/ })).toBeDefined()
   await ui.unmount()
 })
 
 test('with no agents the board says so', async $ => {
   const ui = await $.ui.mount({ plugin: 'agent-tree', surface: 'terminal', ...PANE })
-  expect(await ui.find({ type: 'Text', text: /No agents yet/ })).toBeDefined()
+  expect(await ui.find({ text: /No agents yet/ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -127,9 +127,9 @@ test('three cards share a row, and a long sentence wraps onto a second line', as
   }
 
   const ui = await $.ui.mount({ plugin: 'agent-tree', surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns: 90 } })
-  expect(await ui.find({ type: 'Text', text: /^Getting started: Look$/, in: 'card-a1' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /^into the Three module$/, in: 'card-a3' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /3 working/ })).toBeDefined()
+  expect(await ui.find({ text: /^Getting started: Look$/ })).toBeDefined()
+  expect(await ui.find({ text: /^into the Three module$/ })).toBeDefined()
+  expect(await ui.find({ text: /3 working/ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -167,7 +167,7 @@ test('inline, the buttons ask for a taller or shorter pane', async ($, on) => {
   await ui.unmount()
 })
 
-test('a click anywhere on a card opens its chat, and hovering shows it can', async ($, on) => {
+test('clicking an agent opens its chat in the same pane, at any size', async ($, on) => {
   const opened: { id: string; title?: string }[] = []
   on('ui.open', (_$, e) => {
     opened.push(e as never)
@@ -178,24 +178,25 @@ test('a click anywhere on a card opens its chat, and hovering shows it can', asy
   await $.agent.spawn({ ...SPAWN, tool_use_id: 't1', description: 'Find auth code', subagentType: 'Explore' })
 
   const ui = await $.ui.mount({ plugin: 'agent-tree', surface: 'terminal', ...PANE })
-  await ui.pointer({ type: 'enter', x: 20, y: 5, in: 'card-a1' })
-  expect(await ui.find({ type: 'Text', text: /chat ›/, in: 'card-a1' })).toBeDefined()
+  await ui.press({ key: 'line-a1-0' })
+  expect(opened.at(-1)).toMatchObject({ id: 'agent-tree', title: 'Chat · Explore' })
+  expect(await ui.find({ type: 'Button', text: /← Board/ })).toBeDefined()
 
-  await ui.pointer({ type: 'down', x: 20, y: 5, button: 'left', in: 'card-a1' })
-  await ui.pointer({ type: 'up', x: 20, y: 5, button: 'left', in: 'card-a1' })
-  expect(opened.at(-1)).toMatchObject({ id: 'agent-chat', title: 'Chat · Explore' })
-
-  await ui.pointer({ type: 'leave', x: 20, y: 5, in: 'card-a1' })
-  expect(await ui.find({ type: 'Text', text: /chat ›/, in: 'card-a1' })).toBeUndefined()
+  await ui.press({ key: 'board' })
+  expect(opened.at(-1)).toMatchObject({ id: 'agent-tree', title: 'Agents' })
+  expect(await ui.find({ type: 'Button', key: 'chat-a1' })).toBeDefined()
   await ui.unmount()
 })
 
-test('where cards cannot take clicks, the name is the button', async ($, on) => {
+test('a narrow pane lists agents one clickable line each', async ($, on) => {
+  on('ui.open', () => ({ value: { isPlaced: true } }) as never)
   on('agent.spawn', () => ({ model: 'sonnet', agentId: 'a1' }))
   await $.agent.spawn({ ...SPAWN, tool_use_id: 't1', description: 'Find auth code', subagentType: 'Explore' })
 
-  const ui = await $.ui.mount({ plugin: 'agent-tree', surface: 'vscode', ...PANE })
-  expect(await ui.find({ type: 'Button', text: /^Explore$/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /Click an agent's name/ })).toBeDefined()
+  const ui = await $.ui.mount({ plugin: 'agent-tree', surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns: 24 } })
+  expect(await ui.find({ text: /▝▜█████▛▘/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Button', text: /^Explore · Getting/ })).toBeDefined()
+  await ui.press({ key: 'chat-a1' })
+  expect(await ui.find({ type: 'Button', text: /← Board/ })).toBeDefined()
   await ui.unmount()
 })

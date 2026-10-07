@@ -9,7 +9,7 @@ const PROPS = {
   view: {},
 }
 const BOARD = { component: 'Pane' as const, requestId: 'agent-tree', props: { ...PROPS, title: 'Agents' } }
-const CHAT = { component: 'Pane' as const, requestId: 'agent-chat', props: PROPS }
+const CHAT = BOARD
 
 const SPAWN = { prompt: 'Do it', parentModel: 'opus', provider: 'claude' as never, background: false, fork: false }
 
@@ -28,8 +28,8 @@ test("clicking an agent's card opens its chat, with its steps and results", asyn
   await $.tool.call({ tool: 'Grep', pattern: 'login', agentId: 'a1' } as never)
 
   const board = await $.ui.mount({ plugin: 'agent-tree', surface: 'terminal', ...BOARD })
-  await board.post({ open: 'a1' }, { in: 'card-a1' })
-  expect(opens.at(-1)).toMatchObject({ id: 'agent-chat', title: 'Chat · Explore' })
+  await board.press({ key: 'chat-a1' })
+  expect(opens.at(-1)).toMatchObject({ id: 'agent-tree', title: 'Chat · Explore' })
   await board.unmount()
 
   const chat = await $.ui.mount({ plugin: 'agent-tree', surface: 'terminal', ...CHAT })
@@ -57,7 +57,7 @@ test('its words show up in the chat as they stream', async ($, on) => {
   }
 
   const board = await $.ui.mount({ plugin: 'agent-tree', surface: 'terminal', ...BOARD })
-  await board.post({ open: 'a1' }, { in: 'card-a1' })
+  await board.press({ key: 'chat-a1' })
   await board.unmount()
 
   const chat = await $.ui.mount({ plugin: 'agent-tree', surface: 'terminal', ...CHAT })
@@ -81,7 +81,7 @@ test('typing in the field sends the agent a message', async ($, on) => {
   await $.turn.complete({ agentId: 'a1', answer: 'All good.', durationMs: 1, isAborted: false, turnId: 'x', reason: 'answer' })
 
   const board = await $.ui.mount({ plugin: 'agent-tree', surface: 'terminal', ...BOARD })
-  await board.post({ open: 'a1' }, { in: 'card-a1' })
+  await board.press({ key: 'chat-a1' })
   await board.unmount()
 
   const chat = await $.ui.mount({ plugin: 'agent-tree', surface: 'terminal', ...CHAT })
@@ -104,7 +104,7 @@ test('a message that cannot be delivered says why', async ($, on) => {
 
   await $.agent.spawn({ ...SPAWN, tool_use_id: 't1', description: 'Audit', subagentType: 'Explore' })
   const board = await $.ui.mount({ plugin: 'agent-tree', surface: 'terminal', ...BOARD })
-  await board.post({ open: 'a1' }, { in: 'card-a1' })
+  await board.press({ key: 'chat-a1' })
   await board.unmount()
 
   const chat = await $.ui.mount({ plugin: 'agent-tree', surface: 'terminal', ...CHAT })
@@ -113,8 +113,21 @@ test('a message that cannot be delivered says why', async ($, on) => {
   await chat.unmount()
 })
 
-test('with no agent picked the chat says how to pick one', async $ => {
-  const chat = await $.ui.mount({ plugin: 'agent-tree', surface: 'terminal', ...CHAT })
-  expect(await chat.find({ type: 'Text', text: /Pick an agent on the board/ })).toBeDefined()
-  await chat.unmount()
+test('a short pane keeps the message field in view', async ($, on) => {
+  on('ui.open', () => ({ value: { isPlaced: true } }) as never)
+  on('agent.spawn', () => ({ model: 'sonnet', agentId: 'a1' }))
+  on('tool.call', () => ({ result: {} as never, text: 'ok' }) as never)
+  await $.agent.spawn({ ...SPAWN, tool_use_id: 't1', description: 'Busy', subagentType: 'Explore' })
+  for (let n = 0; n < 30; n += 1) {
+    await $.tool.call({ tool: 'Grep', pattern: `step ${n}`, agentId: 'a1' } as never)
+  }
+
+  const short = { ...BOARD, props: { ...PROPS, bodyColumns: 40, scroll: { offset: 0, bodyRows: 10 } } }
+  const ui = await $.ui.mount({ plugin: 'agent-tree', surface: 'terminal', ...short })
+  await ui.press({ key: 'chat-a1' })
+  expect(await ui.find({ key: 'say' })).toBeDefined()
+  expect(await ui.find({ text: /▝▜█████▛▘/ })).toBeUndefined()
+  expect(await ui.find({ text: /step 29/ })).toBeDefined()
+  expect(await ui.find({ text: /step 10"/ })).toBeUndefined()
+  await ui.unmount()
 })

@@ -4,7 +4,6 @@ import type { Agent, AgentStatus, Entry, PaneSize } from '../types'
 
 export const PANE = 'agent-tree'
 export const TITLE = 'Agents'
-export const CHAT = 'agent-chat'
 // The most transcript entries kept per agent.
 export const LOG_LIMIT = 300
 export const TICK_MS = 300
@@ -30,6 +29,8 @@ export const LABELS: Record<AgentStatus, string> = { running: 'working', done: '
 export const ROOT = '#d97757'
 export const TEXT = '#c0caf5'
 export const MUTED = '#565f89'
+// A faint wash behind a list line under the pointer.
+export const HOVER = '#2a2e42'
 
 // The little Claude critter, three rows tall. A working one walks and blinks.
 export const HEAD = ' ▐▛███▜▌ '

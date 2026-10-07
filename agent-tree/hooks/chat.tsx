@@ -1,10 +1,11 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 
-import type { Agent, Entry, PaneSize } from '../types'
+import type { Agent, Entry } from '../types'
 
 import {
-  CHAT,
+  PANE,
+  TITLE,
   COLORS,
   LABELS,
   MUTED,
@@ -12,7 +13,6 @@ import {
   TEXT,
   TICK_MS,
   critter,
-  paneArgs,
   statusText,
   withLog,
   withText,
@@ -24,15 +24,16 @@ import {
 // The session's values, shared with the board by their plugin and key.
 const agents = atom({ plugin: 'agent-tree', key: 'agents' } as const, [] as Agent[])
 const now = atom({ plugin: 'agent-tree', key: 'now' } as const, 0)
-const size = atom({ plugin: 'agent-tree', key: 'size' } as const, { columns: 0, rows: 0 } as PaneSize)
 const logs = atom({ plugin: 'agent-tree', key: 'logs' } as const, {} as Record<string, Entry[]>)
 const chatWith = atom({ plugin: 'agent-tree', key: 'chatWith' } as const, null as string | null)
 const draft = atom({ plugin: 'agent-tree', key: 'draft' } as const, '')
 
 // Streamed words reach the chat at most this often.
 const FLUSH_MS = 250
-// Rows the header, divider, field and buttons take, around the transcript.
-const CHROME_ROWS = 9
+// Below this many rows the chat drops the critter and the dividers to keep the field in view.
+const ROOMY_ROWS = 16
+// Rows around the transcript: header, dividers, the field (up to 3 rows with its frame) and the buttons.
+const CHROME_ROWS = { roomy: 3 + 1 + 1 + 3 + 1, tight: 1 + 3 + 1 }
 
 const MARKS: Record<Entry['kind'], { mark: string; color: string; bold?: boolean }> = {
   you: { mark: 'you ›', color: ROOT, bold: true },
@@ -111,31 +112,40 @@ export const registerChat = (on: On) => {
     await flush()
   })
 
-  on('ui.render', { component: 'Pane', requestId: CHAT }, async ($, e) => {
+  // The chat draws the board's pane while one is open; the board draws it otherwise.
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
+    const id = await read($, chatWith)
+    if (id === null) {
+      return next(e)
+    }
+
     const table = $.ui.resolve(e)
     const { Box, Button, Text } = table
     // Every surface but mobile has a text field.
     const Input = 'Input' in table ? table.Input : undefined
-    const id = await read($, chatWith)
     const agent: Agent | undefined = (await read($, agents)).find(one => one.id === id)
-    const width = Math.max(30, e.props.bodyColumns)
+    const width = Math.max(12, e.props.bodyColumns)
 
+    const toBoard = async () => {
+      await update($, chatWith, () => null)
+      await $.ui.open({ id: PANE, title: TITLE })
+    }
     const back = (
       <Box>
-        <Button key="board" onPress={() => void (async () => $.ui.open(paneArgs(await read($, size))))()}>
-          ▣ Board
+        <Button key="board" onPress={() => void toBoard()}>
+          ← Board
         </Button>
         <Text> </Text>
-        <Button key="close-chat" role="dismiss" onPress={() => void $.ui.close({ id: CHAT })}>
+        <Button key="close-chat" role="dismiss" onPress={() => void $.ui.close({ id: PANE })}>
           Close
         </Button>
       </Box>
     )
 
-    if (id === null || agent === undefined) {
+    if (agent === undefined) {
       return (
         <Box flexDirection="column">
-          <Text color={MUTED}>Pick an agent on the board to chat with it.</Text>
+          <Text color={MUTED}>That agent is no longer on the board.</Text>
           {back}
         </Box>
       )
@@ -146,8 +156,11 @@ export const registerChat = (on: On) => {
     const tick = Math.floor((await read($, now)) / TICK_MS)
     const color = COLORS[agent.status]
     const [head, body, legs] = critter(agent.status, tick)
-    const room = Math.max(4, e.props.scroll.bodyRows - CHROME_ROWS)
+    const rows = e.props.scroll.bodyRows
+    const isRoomy = rows >= ROOMY_ROWS
+    const room = Math.max(2, rows - (isRoomy ? CHROME_ROWS.roomy : CHROME_ROWS.tight))
     const lines = transcript(entries, width - 1).slice(-room)
+    const rule = <Text color={MUTED}>{'─'.repeat(width)}</Text>
 
     const send = async (value: string) => {
       const text = value.trim()
@@ -166,28 +179,38 @@ export const registerChat = (on: On) => {
 
     return (
       <Box flexDirection="column">
-        <Box>
-          <Box flexDirection="column">
-            <Text color={color}>{head}</Text>
-            <Text color={color}>{body}</Text>
-            <Text color={color}>{legs}</Text>
+        {isRoomy ? (
+          <Box>
+            <Box flexDirection="column">
+              <Text color={color}>{head}</Text>
+              <Text color={color}>{body}</Text>
+              <Text color={color}>{legs}</Text>
+            </Box>
+            <Box flexDirection="column" marginLeft={1}>
+              <Text color={TEXT} bold>
+                {short(agent.type, width - 12)}
+              </Text>
+              <Text color={color}>{LABELS[agent.status]}</Text>
+              <Text color={MUTED}>{short(agent.doing, width - 12)}</Text>
+            </Box>
           </Box>
-          <Box flexDirection="column" marginLeft={1}>
+        ) : (
+          <Box>
+            <Text color={color}>{'▐▛▜▌ '}</Text>
             <Text color={TEXT} bold>
-              {short(agent.type, width - 12)}
+              {short(agent.type, Math.max(4, width - 20))}
             </Text>
-            <Text color={color}>{LABELS[agent.status]}</Text>
-            <Text color={MUTED}>{short(agent.doing, width - 12)}</Text>
+            <Text color={color}>{` ${LABELS[agent.status]}`}</Text>
           </Box>
-        </Box>
-        <Text color={MUTED}>{'─'.repeat(width)}</Text>
+        )}
+        {isRoomy && rule}
         {lines.length === 0 && <Text color={MUTED}>Nothing yet. Its words, steps and results show up here as it works.</Text>}
         {lines.map((line, i) => (
           <Text key={`l-${i}`} color={line.color} bold={line.bold}>
             {line.text}
           </Text>
         ))}
-        <Text color={MUTED}>{'─'.repeat(width)}</Text>
+        {isRoomy && rule}
         {Input ? (
           <Input
             key="say"
