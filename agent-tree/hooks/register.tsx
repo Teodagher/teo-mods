@@ -1,151 +1,77 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Agent, AgentStatus, PaneSize } from '../types'
+import type { Agent, AgentStatus, Entry, PaneSize } from '../types'
 
+import { registerChat } from './chat'
+
+import {
+  BLINK,
+  BODY,
+  CHAT,
+  COLORS,
+  HEAD,
+  LABELS,
+  LEGS,
+  LIMITS,
+  LOG_LIMIT,
+  MIN_CARD,
+  MUTED,
+  PANE,
+  QUIET_MS,
+  ROOT,
+  STEP_COLUMNS,
+  STEP_ROWS,
+  STILL,
+  TEXT,
+  TICK_MS,
+  TITLE,
+  base,
+  clamp,
+  critter,
+  firstSentence,
+  host,
+  oneLine,
+  ordered,
+  patch,
+  preview,
+  sentence,
+  short,
+  wrap,
+  chatTitle,
+  paneArgs,
+  statusText,
+  withLog,
+} from './shared'
+
+// The session's values, shared with the chat by their plugin and key.
 const agents = atom({ plugin: 'agent-tree', key: 'agents' } as const, [] as Agent[])
 const now = atom({ plugin: 'agent-tree', key: 'now' } as const, 0)
 const opened = atom({ plugin: 'agent-tree', key: 'opened' } as const, false)
 const size = atom({ plugin: 'agent-tree', key: 'size' } as const, { columns: 0, rows: 0 } as PaneSize)
+const logs = atom({ plugin: 'agent-tree', key: 'logs' } as const, {} as Record<string, Entry[]>)
+const chatWith = atom({ plugin: 'agent-tree', key: 'chatWith' } as const, null as string | null)
 
-const PANE = 'agent-tree'
-const TITLE = 'Agents'
-const TICK_MS = 300
-// Past this long with no news, a working agent stops moving the clock.
-const QUIET_MS = 10 * 60 * 1000
-// Cards are at least this wide, borders included; the pane fits as many as it can.
-const MIN_CARD = 28
-// One press of − or + : a card's width when docked, a card's height inline.
-const STEP_COLUMNS = MIN_CARD + 1
-const STEP_ROWS = 7
-const LIMITS = { columns: [MIN_CARD + 2, 240], rows: [9, 80] } as const
-
-const clamp = (n: number, [low, high]: readonly [number, number]) => Math.min(high, Math.max(low, n))
-
-// Opens the pane at the size last asked for; a size the person dragged still wins.
+// $ stays in this file: helpers that use it live beside the hooks that call them.
 const openPane = async ($: EngineInterface) => {
-  const { columns, rows } = await read($, size)
-  await $.ui.open({ id: PANE, title: TITLE, ...(columns > 0 ? { columns } : {}), ...(rows > 0 ? { rows } : {}) })
+  await $.ui.open(paneArgs(await read($, size)))
 }
 
-const COLORS: Record<AgentStatus, string> = {
-  running: '#d97757',
-  done: '#22c55e',
-  failed: '#f7768e',
-  stopped: '#e0af68',
-}
-const LABELS: Record<AgentStatus, string> = { running: 'working', done: 'done', failed: 'failed', stopped: 'stopped' }
-const ROOT = '#d97757'
-const TEXT = '#c0caf5'
-const MUTED = '#565f89'
-
-// The little Claude critter, three rows tall. A working one walks and blinks.
-const HEAD = ' ▐▛███▜▌ '
-const BLINK = ' ▐█████▌ '
-const BODY = '▝▜█████▛▘'
-const LEGS = ['  ▘▘ ▝▝  ', '  ▝▘ ▘▝  ']
-const STILL = '  ▘▘ ▝▝  '
-
-const critter = (status: AgentStatus, tick: number) =>
-  status === 'running'
-    ? [tick % 12 === 0 ? BLINK : HEAD, BODY, LEGS[tick % LEGS.length] ?? STILL]
-    : [HEAD, BODY, STILL]
-
-const short = (text: string, max: number) =>
-  max <= 1 ? '' : text.length > max ? `${text.slice(0, max - 1)}…` : text
-
-const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim()
-
-const base = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path
-
-const host = (url: string) => /^[a-z]+:\/\/([^/]+)/i.exec(url)?.[1] ?? url
-
-// One plain sentence for what a tool call is doing.
-const sentence = (e: { tool: string }) => {
-  const input = e as Record<string, unknown>
-  const text = (key: string) => (typeof input[key] === 'string' ? oneLine(input[key] as string) : '')
-  const tool = e.tool.startsWith('mcp__') ? (e.tool.split('__').at(-1) ?? e.tool) : e.tool
-
-  switch (tool) {
-    case 'Read':
-      return `Reading ${base(text('file_path'))}`
-    case 'Grep':
-      return `Searching the code for "${text('pattern')}"`
-    case 'Glob':
-      return `Looking for files like ${text('pattern')}`
-    case 'Edit':
-      return `Editing ${base(text('file_path'))}`
-    case 'Write':
-      return `Writing ${base(text('file_path'))}`
-    case 'WebSearch':
-      return `Searching the web for "${text('query')}"`
-    case 'WebFetch':
-      return `Reading a page on ${host(text('url'))}`
-    case 'Bash':
-      return text('description') || `Running ${text('command').split(' ')[0] || 'a command'}`
-    case 'Agent':
-      return `Handing off: ${text('description')}`
-    default:
-      return text('description') || `Using ${tool}`
-  }
-}
-
-const firstSentence = (text: string) => {
-  const flat = oneLine(text.replace(/[#*`>_]/g, ''))
-
-  return (/^.+?[.!?](\s|$)/.exec(flat)?.[0] ?? flat).trim()
-}
-
-// Words into at most `lines` lines of `width`, the last one cut with an ellipsis.
-const wrap = (text: string, width: number, lines: number) => {
-  const out: string[] = []
-  let rest = text
-  while (rest !== '' && out.length < lines) {
-    if (out.length === lines - 1 || rest.length <= width) {
-      out.push(short(rest, width))
-      break
-    }
-    const cut = rest.lastIndexOf(' ', width)
-    const at = cut > 0 ? cut : width
-    out.push(rest.slice(0, at))
-    rest = rest.slice(at).trimStart()
-  }
-
-  return out
-}
-
-const patch = (list: Agent[], id: string, change: (agent: Agent) => Agent) =>
-  list.map(agent => (agent.id === id ? change(agent) : agent))
-
-// Parents before their children, so a team reads left to right.
-const ordered = (list: Agent[]) => {
-  const ids = new Set(list.map(agent => agent.id))
-  const isRoot = (agent: Agent) => agent.parentId === null || agent.parentId === agent.id || !ids.has(agent.parentId)
-  const out: Agent[] = []
-  const seen = new Set<string>()
-  const walk = (agent: Agent) => {
-    if (seen.has(agent.id)) {
-      return
-    }
-    seen.add(agent.id)
-    out.push(agent)
-    list.filter(one => one.parentId === agent.id && !isRoot(one)).forEach(walk)
-  }
-  list.filter(isRoot).forEach(walk)
-  // Agents caught in a loop of parents.
-  list.filter(agent => !seen.has(agent.id)).forEach(agent => out.push(agent))
-
-  return out
-}
-
-// The status line says how many agents work, and clears when none do.
 const showStatus = async ($: EngineInterface) => {
-  const list = await read($, agents)
-  const running = list.filter(agent => agent.status === 'running').length
-  $.ui.status(running === 0 ? undefined : `▐▛▜▌ ${running} agent${running === 1 ? '' : 's'} working`)
+  $.ui.status(statusText(await read($, agents)))
+}
+
+const addLog = ($: EngineInterface, id: string, kind: Entry['kind'], text: string) =>
+  update($, logs, all => withLog(all, id, kind, text))
+
+const openChat = async ($: EngineInterface, agent: Agent) => {
+  await update($, chatWith, () => agent.id)
+  await $.ui.open({ id: CHAT, title: chatTitle(agent), focus: true })
 }
 
 export const register: Register = on => {
+  registerChat(on)
+
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'agent-tree', description: 'Open the live board of subagents' })
     await update($, now, () => Date.now())
@@ -223,10 +149,22 @@ export const register: Register = on => {
 
         return patch(all, agentId, agent => ({ ...agent, status: 'running', lastAt: at, doing }))
       })
+      await addLog($, agentId, 'tool', doing)
       await showStatus($)
     }
 
     const ran = await next(e)
+
+    // What came back, for the agent's chat.
+    if (agentId !== undefined) {
+      if (ran.deny !== undefined) {
+        await addLog($, agentId, 'error', `Refused: ${preview(ran.deny)}`)
+      } else if (ran.isError === true) {
+        await addLog($, agentId, 'error', preview(ran.text ?? 'Failed.'))
+      } else if (ran.text) {
+        await addLog($, agentId, 'result', preview(ran.text))
+      }
+    }
 
     // The main session stopping an agent.
     if ((e.tool as string) === 'TaskStop' && ran.deny === undefined && ran.isError !== true) {
@@ -259,6 +197,7 @@ export const register: Register = on => {
             ? 'Hit an error and stopped.'
             : 'Was stopped before it finished.'
       await update($, agents, list => patch(list, agentId, agent => ({ ...agent, status, lastAt: Date.now(), doing })))
+      await addLog($, agentId, 'end', status === 'done' ? 'Finished.' : doing)
       await update($, now, () => Date.now())
       await showStatus($)
     }
@@ -304,6 +243,7 @@ export const register: Register = on => {
           <Text color={MUTED}>{summary === '' ? '' : `  ${summary}`}</Text>
         </Box>
         {list.length === 0 && <Text color={MUTED}>No agents yet. Each one shows up here the moment it starts.</Text>}
+        {list.length > 0 && <Text color={MUTED}>Click an agent's name to chat with it.</Text>}
         <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
           {list.map((agent, i) => {
             const color = COLORS[agent.status]
@@ -315,9 +255,10 @@ export const register: Register = on => {
               <Box key={agent.id} width={card} height={7} flexDirection="column" borderStyle="round" borderColor={color} paddingX={1}>
                 <Box>
                   <Text color={color}>{head}</Text>
-                  <Text color={TEXT} bold>
-                    {` ${short(agent.type, side)}`}
-                  </Text>
+                  <Text> </Text>
+                  <Button key={`chat-${agent.id}`} plain onPress={() => void openChat($, agent)}>
+                    {short(agent.type, side - 1)}
+                  </Button>
                 </Box>
                 <Box>
                   <Text color={color}>{body}</Text>
